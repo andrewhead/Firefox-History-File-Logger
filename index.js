@@ -1,15 +1,28 @@
+// The code for this plugin comes from several examples.
+// One of these examples is the MDN page on dialogues in the browser:
+// https://developer.mozilla.org/en-US/Add-ons/SDK/Tutorials/Display_a_Popup
+
 var self = require('sdk/self');
+var data = require('sdk/self').data;
 var windows = require('sdk/windows').browserWindows;
 var tabs = require('sdk/tabs');
 var Request = require('sdk/request').Request;
+var Panel = require('sdk/panel').Panel;
+var ActionButton = require('sdk/ui/button/action').ActionButton;
 
 
-function log(tab, eventMessage) {
+// Global variables
+var HOST = "http://127.0.0.1:8000";
+var USERNAME = "participant";
+var apiKey = null;
+
+
+function log(tab, eventMessage, callback) {
 
   console.log("Logging event:", eventMessage, "-", tab.index, tab.title, tab.url);
 
   var request = Request({
-    url: "http://127.0.0.1:8000/api/location_event/",
+    url: HOST + "/api/location_event/",
     content: JSON.stringify({
       visit_date: new Date().toISOString(),
       tab_index: tab.index,
@@ -17,7 +30,15 @@ function log(tab, eventMessage) {
       url: tab.url,
       event_type: eventMessage
     }),
-    contentType: 'application/json'
+    contentType: 'application/json',
+    headers: {
+      Authorization: "ApiKey " + USERNAME + ":" + apiKey
+    },
+    onComplete: function(response) {
+      if (callback !== undefined) {
+        callback(response);
+      }
+    }
   });
   request.post();
 
@@ -43,4 +64,62 @@ tabs.on('ready', function(tab) {
 
 tabs.on('activate', function(tab) {
   log(tab, "Tab activated");
+});
+
+
+// Set the API key, and fail if this is an invalid key
+function setApiKey(newApiKey, callback) {
+  apiKey = newApiKey;
+  log(windows.activeWindow.tabs.activeTab, "Testing API key", function(response) {
+    // HTTP response 201 is the response for a created resource
+    callback(response.status === 201);
+  });
+}
+
+
+function startStudy() {
+
+  var apiKeyEntry = Panel({
+    width: 400,
+    height: 130,
+    contentURL: data.url("text-entry.html"),
+    contentScriptFile: data.url("get-apikey.js")
+  });
+
+  apiKeyEntry.on('show', function() {
+    apiKeyEntry.port.emit('show');
+  });
+
+  apiKeyEntry.port.on('text-entered', function(text) {
+    apiKey = text;
+    apiKeyEntry.hide();
+  });
+
+  // If the panel is dismissed before the API key is given, bring it back up.
+  apiKeyEntry.on('hide', function() {
+    if (apiKey !== '' && apiKey !== null) {
+      setApiKey(apiKey, function(correct) {
+        if (correct === false) {
+          apiKeyEntry.show();
+        }
+      });
+    } else {
+      apiKeyEntry.show();
+    }
+  });
+
+  apiKeyEntry.show();
+
+}
+
+
+ActionButton({
+  id: 'start-study',
+  label: "Start Study",
+  onClick: startStudy,
+  icon: {
+    '16': './icon-16.png',
+    '32': './icon-32.png',
+    '64': './icon-64.png'
+  }
 });
