@@ -1,0 +1,13 @@
+{
+  "title": "Search Task Helper",
+  "name": "search-task-helper",
+  "version": "0.0.1",
+  "description": "A Firefox addon that listens to and reports search behavior.",
+  "main": "index.js",
+  "author": "Andrew Head",
+  "engines": {
+    "firefox": ">=38.0a1",
+    "fennec": ">=38.0a1"
+  },
+  "license": "MIT"
+}
