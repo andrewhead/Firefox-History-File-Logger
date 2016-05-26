@@ -12,7 +12,7 @@ var ActionButton = require('sdk/ui/button/action').ActionButton;
 
 
 // Global variables
-var HOST = "http://127.0.0.1:8000";
+var HOST = "https://searchlogger.tutorons.com";
 var apiKey = null;
 var username = null;
 
