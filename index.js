@@ -13,8 +13,8 @@ var ActionButton = require('sdk/ui/button/action').ActionButton;
 
 // Global variables
 var HOST = "http://127.0.0.1:8000";
-var USERNAME = "participant";
 var apiKey = null;
+var username = null;
 
 
 function log(tab, eventMessage, callback) {
@@ -32,7 +32,7 @@ function log(tab, eventMessage, callback) {
     }),
     contentType: 'application/json',
     headers: {
-      Authorization: "ApiKey " + USERNAME + ":" + apiKey
+      Authorization: "ApiKey " + username + ":" + apiKey
     },
     onComplete: function(response) {
       if (callback !== undefined) {
@@ -68,7 +68,8 @@ tabs.on('activate', function(tab) {
 
 
 // Set the API key, and fail if this is an invalid key
-function setApiKey(newApiKey, callback) {
+function setCredentials(newUsername, newApiKey, callback) {
+  username = newUsername;
   apiKey = newApiKey;
   log(windows.activeWindow.tabs.activeTab, "Testing API key", function(response) {
     // HTTP response 201 is the response for a created resource
@@ -79,9 +80,11 @@ function setApiKey(newApiKey, callback) {
 
 function startStudy() {
 
+  var localUsername, localApiKey;
+
   var apiKeyEntry = Panel({
-    width: 400,
-    height: 130,
+    width: 250,
+    height: 180,
     contentURL: data.url("text-entry.html"),
     contentScriptFile: data.url("get-apikey.js")
   });
@@ -90,15 +93,16 @@ function startStudy() {
     apiKeyEntry.port.emit('show');
   });
 
-  apiKeyEntry.port.on('text-entered', function(text) {
-    apiKey = text;
+  apiKeyEntry.port.on('text-entered', function(data) {
+    localUsername = data.username;
+    localApiKey = data.apiKey;
     apiKeyEntry.hide();
   });
 
   // If the panel is dismissed before the API key is given, bring it back up.
   apiKeyEntry.on('hide', function() {
-    if (apiKey !== '' && apiKey !== null) {
-      setApiKey(apiKey, function(correct) {
+    if (localApiKey !== '' && localApiKey !== null && localUsername !== '' && localUsername !== null) {
+      setCredentials(localUsername, localApiKey, function(correct) {
         if (correct === false) {
           apiKeyEntry.show();
         }

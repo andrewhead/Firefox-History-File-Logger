@@ -3,17 +3,21 @@
 <html>
     <head>
         <style type='text/css' media='all'>
-          textarea {
-            margin: 10px;
-          }
           body {
             background-color: #f6f6f6;
           }
         </style>
     </head>
     <body>
-        <p>Please enter your API key here.</p>
-        <textarea rows="1" cols="40" id="entry-box"></textarea>
-        <p>Hit "Enter" when you are finished</p>
+        <p>Please enter your credentials here.</p>
+        <form>
+            <p>Username:</p>
+            <input type='text' id='text_username' /><br/>
+            <p>API Key:</p>
+            <input type='text' id='text_apikey' /><br/>
+        </form>
+        <button id='button_submit'>Submit</button>
+        <!--<textarea rows="1" cols="40" id="entry-box"></textarea>-->
+        <!--<p>Hit "Enter" when you are finished</p>-->
     </body>
 </html>
