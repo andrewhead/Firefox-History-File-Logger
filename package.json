@@ -1,8 +1,8 @@
 {
-  "title": "Search Task Helper",
-  "name": "search-task-helper",
-  "version": "0.0.1",
-  "description": "A Firefox addon that listens to and reports search behavior.",
+  "title": "Web Navigation Logger",
+  "name": "web-navigation-logger",
+  "version": "0.0.2",
+  "description": "A Firefox addon that reports when and how long you visit URLs.",
   "main": "index.js",
   "author": "Andrew Head",
   "engines": {
