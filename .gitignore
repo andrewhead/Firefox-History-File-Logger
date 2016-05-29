@@ -35,3 +35,6 @@ node_modules
 # Temporary text editor files
 .*.swp
 .*.swo
+
+# Build output
+*.xpi
