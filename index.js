@@ -97,7 +97,7 @@ function log(credential, tab, eventMessage, callback, err) {
   console.log("Logging event:", eventMessage, "-", tab.index, tab.title, tab.url);
 
   var request = Request({
-    url: HOST + "/api/location_event/",
+    url: HOST + "/log/api/location_event/",
     content: JSON.stringify({
       visit_date: new Date().toISOString(),
       tab_index: tab.index,
