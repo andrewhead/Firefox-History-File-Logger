@@ -6,10 +6,15 @@
           body {
             background-color: #f6f6f6;
           }
+          #message_error {
+            color: red;
+            display: none;
+          }
         </style>
     </head>
     <body>
-        <p>Please enter your credentials here.</p>
+        <p>Please enter your username and API key.</p>
+        <p id='message_error'>Error: invalid credentials.  Try again.</p>
         <form>
             <p>Username:</p>
             <input type='text' id='text_username' /><br/>
@@ -17,7 +22,6 @@
             <input type='text' id='text_apikey' /><br/>
         </form>
         <button id='button_submit'>Submit</button>
-        <!--<textarea rows="1" cols="40" id="entry-box"></textarea>-->
-        <!--<p>Hit "Enter" when you are finished</p>-->
+        <button id='button_cancel'>Cancel</button>
     </body>
 </html>

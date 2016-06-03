@@ -8,13 +8,14 @@ var windows = require('sdk/windows').browserWindows;
 var tabs = require('sdk/tabs');
 var Request = require('sdk/request').Request;
 var Panel = require('sdk/panel').Panel;
-var ActionButton = require('sdk/ui/button/action').ActionButton;
+var ToggleButton = require('sdk/ui/button/toggle').ToggleButton;
 var passwords = require('sdk/passwords');
 
 
 // Global variables
 var HOST = "https://searchlogger.tutorons.com";
 var CREDENTIAL_REALM = "Search Task Logger";
+var logToggleButton;
 
 
 // Retrieve the username and API key from memory, if there is one
@@ -22,7 +23,6 @@ function getCredential(callback, err) {
   passwords.search({
     realm: CREDENTIAL_REALM,
     onComplete: function(credentials) {
-      console.log("Credentials:", credentials.length);
       if (credentials.length >= 1) {
         if (callback !== undefined) {
           callback(credentials[0]);
@@ -92,7 +92,7 @@ function setCredential(credential, callback) {
 
 
 // Upload a navigation event to the web server
-function log(credential, tab, eventMessage, callback, err) {
+function submitLogEvent(credential, tab, eventMessage, callback, err) {
 
   console.log("Logging event:", eventMessage, "-", tab.index, tab.title, tab.url);
 
@@ -126,55 +126,78 @@ function log(credential, tab, eventMessage, callback, err) {
 
 
 function isCredentialValid(credential, callback) {
-  console.log("Checking credential:", credential);
-  log(credential, windows.activeWindow.tabs.activeTab, "Testing API key", function(response) {
+  submitLogEvent(credential, windows.activeWindow.tabs.activeTab, "Testing API key", function(response) {
     // HTTP response 201 is the response for a created resource
     callback(response.status === 201);
   });
 }
 
 
-function askForCredential(callback) {
+/**
+ * Callback functions:
+ * callback: called on success
+ * skip: called when the window was dismissed
+ * err: called  when the login credentials were invalid
+ */
+function askForCredential(callback, skip, err) {
 
-  var localUsername, localApiKey;
+  // This variable is for keeping track over whether the panel was dismissed intentionally
+  // (true) or unintentionally (false) (e.g., by a change of focus).
+  var panelDismissed;
 
   var apiKeyEntry = Panel({
     width: 250,
     height: 180,
-    contentURL: data.url("text-entry.html"),
-    contentScriptFile: data.url("get-apikey.js")
+    contentURL: data.url("authentication.html"),
+    contentScriptFile: data.url("authentication.js"),
   });
 
   apiKeyEntry.on('show', function() {
+    panelDismissed = false;
     apiKeyEntry.port.emit('show');
   });
 
-  apiKeyEntry.port.on('text-entered', function(data) {
-    localUsername = data.username;
-    localApiKey = data.apiKey;
-    apiKeyEntry.hide();
-  });
+  apiKeyEntry.port.on('submit', function(data) {
 
-  // If the panel is dismissed before the API key is given, bring it back up.
-  apiKeyEntry.on('hide', function() {
-    if (localApiKey !== '' && localApiKey !== null && localUsername !== '' && localUsername !== null) {
+    panelDismissed = true;
+    var username = data.username;
+    var apiKey = data.apiKey;
+
+    if (apiKey !== '' && apiKey !== null && username !== '' && username !== null) {
       var credential = {
         realm: CREDENTIAL_REALM,
-        username: localUsername,
-        password: localApiKey
+        username: username,
+        password: apiKey
       };
       isCredentialValid(credential, function(valid) {
         if (valid === true) {
           setCredential(credential, function() {
-            callback(credential);
-            console.log("New credential:", credential);
+            apiKeyEntry.hide();
+            if (callback !== undefined) {
+              callback(credential);
+            }
           });
         } else {
-          askForCredential(callback);
+          apiKeyEntry.port.emit('retry');
         }
       });
     } else {
-      askForCredential(callback);
+      apiKeyEntry.port.emit('retry');
+    }
+
+  });
+
+  apiKeyEntry.port.on('cancel', function() {
+    panelDismissed = true;
+    apiKeyEntry.hide();
+    if (err !== undefined) {
+      err();
+    }
+  });
+
+  apiKeyEntry.on('hide', function() {
+    if (panelDismissed === false && skip !== undefined) {
+      skip();
     }
   });
 
@@ -182,14 +205,60 @@ function askForCredential(callback) {
 
 }
 
+
+function askForLoginMethod(callback, skip) {
+
+  // This variable is for keeping track over whether the panel was dismissed intentionally
+  // (true) or unintentionally (false) (e.g., by a change of focus).
+  var panelDismissed;
+
+  var loginMethodPanel = Panel({
+    width: 250,
+    height: 120,
+    contentURL: data.url("pickauthentication.html"),
+    contentScriptFile: data.url("pickauthentication.js"),
+  });
+
+  loginMethodPanel.on('show', function() {
+    panelDismissed = false;
+  });
+
+  loginMethodPanel.port.on('new', function() {
+    panelDismissed = true;
+    if (callback !== undefined) {
+      loginMethodPanel.hide();
+      callback('new');
+    }
+  });
+
+  loginMethodPanel.port.on('existing', function() {
+    panelDismissed = true;
+    if (callback !== undefined) {
+      loginMethodPanel.hide();
+      callback('existing');
+    }
+  });
+
+  loginMethodPanel.on('hide', function() {
+    if (panelDismissed === false) {
+      if (skip !== undefined) {
+        skip();
+      }
+    }
+  });
+
+  loginMethodPanel.show();
+
+}
+
+
 // A convenience function for logging, using stored credentials
 function logWithDefaultCredential(tab, eventMessage, callback, err) {
+  if (logToggleButton.state('window').checked === false) {
+      return;
+  }
   getCredential(function(credential) {
-    log(credential, tab, eventMessage, callback, err);
-  }, function() {
-    askForCredential(function(credential) {
-      log(credential, tab, eventMessage, callback, err);
-    });
+    submitLogEvent(credential, tab, eventMessage, callback, err);
   });
 }
 
@@ -222,10 +291,54 @@ tabs.on('activate', function(tab) {
 });
 
 
-ActionButton({
-  id: 'start-study',
-  label: "Start Study",
-  onClick: askForCredential,
+function loginResult(button, result) {
+  if (result === 'failure') {
+    button.click();  // Deactivate button if authentication failed
+    button.badge = 'X';
+    button.badgeColor = 'red';
+  } else if (result === 'success') {
+    button.badge = '√';
+    button.badgeColor = 'green';
+  } else if (result === 'abandoned') {
+    button.click();
+    button.badge = '';
+  }
+}
+
+
+function loginButtonAskForCredential(button) {
+  askForCredential(function() {
+    loginResult(button, 'success'); 
+  }, function() {
+    loginResult(button, 'abandoned');
+  }, function() {
+    loginResult(button, 'failure');
+  });
+}
+
+
+logToggleButton = ToggleButton({
+  id: 'logging-toggle',
+  label: "Toggle URL Logging",
+  onClick: function(state) {
+    if (state.checked === true) {
+      getCredential(function() {
+        askForLoginMethod(function(loginMethod) {
+          if (loginMethod === 'new') {
+            loginButtonAskForCredential(logToggleButton);           
+          } else if (loginMethod === 'existing') {
+            loginResult(logToggleButton, 'success');
+          }
+        }, function() {
+          loginResult(logToggleButton, 'abandoned');
+        });
+      }, function() {
+        loginButtonAskForCredential(logToggleButton);
+      });
+    } else if (state.checked === false) {
+      logToggleButton.badge = '';
+    }
+  },
   icon: {
     '16': './icon-16.png',
     '32': './icon-32.png',
