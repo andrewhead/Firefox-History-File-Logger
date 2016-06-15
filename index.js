@@ -15,7 +15,7 @@ var passwords = require('sdk/passwords');
 // Global variables
 var HOST = "https://searchlogger.tutorons.com";
 var CREDENTIAL_REALM = "Search Task Logger";
-var logToggleButton;
+var logToggleButton, helpfulnessButton;
 
 
 // Retrieve the username and API key from memory, if there is one
@@ -328,6 +328,7 @@ function loginButtonAskForCredential(button) {
 }
 
 
+// Create a toggle for logging in to the logging server
 logToggleButton = ToggleButton({
   id: 'logging-toggle',
   label: "Toggle URL Logging",
@@ -351,8 +352,45 @@ logToggleButton = ToggleButton({
     }
   },
   icon: {
-    '16': './icon-16.png',
-    '32': './icon-32.png',
-    '64': './icon-64.png'
+    '16': './bird-16.png',
+    '32': './bird-32.png',
+    '64': './bird-64.png'
+  }
+});
+
+
+// Create a toggle button for reporting the helfpulness of individual web pages.
+var helpfulnessPanel = Panel({
+  width: 200,
+  height: 120,
+  contentURL: self.data.url('helpfulness.html'),
+  contentScriptFile: data.url("helpfulness.js"),
+  onHide: function() {
+    helpfulnessButton.state('window', { checked: false });
+  }
+});
+
+
+helpfulnessPanel.port.on('submit', function(data) {
+  var message = "Rating: " + data.rating;
+  logWithDefaultCredential(getTabData(tabs.activeTab), message);
+  helpfulnessPanel.hide();
+});
+
+
+helpfulnessButton = ToggleButton({
+  id: 'helpfulness-toggle',
+  label: "Report web page helpfulness",
+  onClick: function(state) {
+    if (state.checked === true) {
+      helpfulnessPanel.show({
+        position: helpfulnessButton
+      });
+    }
+  },
+  icon: {
+    '16': './thumbsup-16.png',
+    '32': './thumbsup-32.png',
+    '64': './thumbsup-64.png',
   }
 });
