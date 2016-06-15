@@ -92,17 +92,17 @@ function setCredential(credential, callback) {
 
 
 // Upload a navigation event to the web server
-function submitLogEvent(credential, tab, eventMessage, callback, err) {
+function submitLogEvent(credential, tabData, eventMessage, callback, err) {
 
-  console.log("Logging event:", eventMessage, "-", tab.index, tab.title, tab.url);
+  console.log("Logging event:", eventMessage, "-", tabData.index, tabData.title, tabData.url);
 
   var request = Request({
     url: HOST + "/log/api/location_event/",
     content: JSON.stringify({
       visit_date: new Date().toISOString(),
-      tab_index: tab.index,
-      title: tab.title,
-      url: tab.url,
+      tab_index: tabData.index,
+      title: tabData.title,
+      url: tabData.url,
       event_type: eventMessage
     }),
     contentType: 'application/json',
@@ -253,41 +253,52 @@ function askForLoginMethod(callback, skip) {
 
 
 // A convenience function for logging, using stored credentials
-function logWithDefaultCredential(tab, eventMessage, callback, err) {
+function logWithDefaultCredential(tabData, eventMessage, callback, err) {
   if (logToggleButton.state('window').checked === false) {
       return;
   }
   getCredential(function(credential) {
-    submitLogEvent(credential, tab, eventMessage, callback, err);
+    submitLogEvent(credential, tabData, eventMessage, callback, err);
   });
 }
 
 
 // EVENT HANDLERS
-// One of the first tasks of this addon is to make sure it has valid credentials for logging events.
-// For any of these event handlers that look for default credentials, the browser will ask a
-// user to provide credentials after the first logging event.
+
+// This helper let's us save information about a tab right after an
+// event, and before it is altered (e.g., before it is destroyed after getting closed).
+function getTabData(tab) {
+  return {
+      index: tab.index,
+      title: tab.title,
+      url: tab.url,
+  };
+}
 
 // Listen for when the window goes in and out of focus
 windows.on('deactivate', function(window) {
-  logWithDefaultCredential(window.tabs.activeTab, "Window deactivated");
+  logWithDefaultCredential(getTabData(window.tabs.activeTab), "Window deactivated");
 });
 
 windows.on('activate', function(window) {
-  logWithDefaultCredential(window.tabs.activeTab, "Window activated");
+  logWithDefaultCredential(getTabData(window.tabs.activeTab), "Window activated");
 });
 
 // Listen for the loading of new tabs and switching between tabs
-tabs.on('open', function(tab) {
-  logWithDefaultCredential(tab, "Tab opened");
-});
+var TAB_EVENTS = [
+  { name: 'open', message: "Tab opened" },
+  { name: 'close', message: "Tab closed" },
+  { name: 'ready', message: "Tab content loaded (ready)" },
+  { name: 'load', message: "Tab content loaded (load)" },
+  { name: 'pageshow', message: "Tab content loaded (pageshow)" },
+  { name: 'activate', message: "Tab activated" },
+  { name: 'deactivate', message: "Tab deactivated" },
+];
 
-tabs.on('ready', function(tab) {
-  logWithDefaultCredential(tab, "Tab content loaded");
-});
-
-tabs.on('activate', function(tab) {
-  logWithDefaultCredential(tab, "Tab activated");
+TAB_EVENTS.forEach(function(eventSpec) {
+  tabs.on(eventSpec.name, function(tab) {
+    logWithDefaultCredential(getTabData(tab), eventSpec.message);
+  });
 });
 
 
