@@ -94,12 +94,13 @@ function setCredential(credential, callback) {
 // Upload a navigation event to the web server
 function submitLogEvent(credential, tabData, eventMessage, callback, err) {
 
-  console.log("Logging event:", eventMessage, "-", tabData.index, tabData.title, tabData.url);
+  console.log("Logging event:", eventMessage, "-", tabData.tab_id, tabData.index, tabData.title, tabData.url);
 
   var request = Request({
     url: HOST + "/log/api/location_event/",
     content: JSON.stringify({
       visit_date: new Date().toISOString(),
+      tab_id: tabData.tab_id,
       tab_index: tabData.index,
       title: tabData.title,
       url: tabData.url,
@@ -269,6 +270,7 @@ function logWithDefaultCredential(tabData, eventMessage, callback, err) {
 // event, and before it is altered (e.g., before it is destroyed after getting closed).
 function getTabData(tab) {
   return {
+      tab_id: tab.id,
       index: tab.index,
       title: tab.title,
       url: tab.url,
