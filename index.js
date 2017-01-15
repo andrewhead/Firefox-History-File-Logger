@@ -1,3 +1,5 @@
+/* jslint esnext: true */
+
 // The code for this plugin comes from several examples.
 // One of these examples is the MDN page on dialogues in the browser:
 // https://developer.mozilla.org/en-US/Add-ons/SDK/Tutorials/Display_a_Popup
@@ -6,16 +8,88 @@ var self = require('sdk/self');
 var data = require('sdk/self').data;
 var windows = require('sdk/windows').browserWindows;
 var tabs = require('sdk/tabs');
-var Request = require('sdk/request').Request;
 var Panel = require('sdk/panel').Panel;
 var ToggleButton = require('sdk/ui/button/toggle').ToggleButton;
 var passwords = require('sdk/passwords');
 
+// These imports are all related to file I/O
+var Cu = require("chrome").Cu;
+var OS = Cu.import("resource://gre/modules/osfile.jsm", {}).OS;
+var TextEncoder = Cu.import("resource://gre/modules/osfile.jsm", {}).TextEncoder;
+var Task = Cu.import("resource://gre/modules/Task.jsm").Task;
+var setTimeout = require('sdk/timers').setTimeout;
+
 
 // Global variables
-var HOST = "https://searchlogger.tutorons.com";
 var CREDENTIAL_REALM = "Search Task Logger";
+var HISTORY_LOG_PATH = OS.Path.join(
+  OS.Constants.Path.desktopDir, '.firefox_history.log');
 var logToggleButton, helpfulnessButton;
+var logQueue = [];
+var historyLogFile;  // global handle to log file, for closing it only.
+var MILLISECONDS_BETWEEN_WRITES = 1000;
+
+
+// A function to handle writing of log events may look like overkill.
+// However, the Mozilla docs on OS.File didn't say anything about how
+// race conditions were handled with multiple writes to the same file.
+// To err on the side of caution (this plugin shouldn't lose any data),
+// this function, with a wait period between each invocation, should be
+// able to manage writes such that we can be sure no data is lost.
+function writeLogEventsToFile(logFile) {
+
+  function writeNextEvent() {
+
+    // Base case: we finish writing when there are no more events to write
+    if (logQueue.length === 0) {
+      return;
+    }
+
+    // Remove the events in FIFO order
+    var logEvent = logQueue.shift();
+
+    // Each line of the log file will contain a JSON object of that log record.
+    // I used JSON objects here instead of CSV so that this could be easily
+    // parsed into data later, without having to worry about writing code
+    // to escape quotes and commas within page titles and usernames.
+    var dataString = JSON.stringify(logEvent) + "\n";
+    var textEncoder = new TextEncoder();
+    var dataStringEncoded = textEncoder.encode(dataString);
+
+    // After a write has completed, do a recursive call to write
+    // the next line using the promise built-in to the write.
+    // I expect only a handful of log events will be in the queue
+    // at each call, so this shouldn't run any risk of stack overflow.
+    logFile.write(dataStringEncoded).then(writeNextEvent);
+
+  }
+
+  // Start off recurisve call to write to file
+  writeNextEvent();
+
+  // Make sure to flush whenever this method is called, so we
+  // know all the data has been written out regularly.
+  logFile.flush();
+
+  // Call this function recursively with `setTimeout` instead of
+  // with `setInterval`.  This is because we always want there to
+  // be a wait between one write finishing and another starting.
+  setTimeout(writeLogEventsToFile, MILLISECONDS_BETWEEN_WRITES, logFile);
+
+}
+
+// Open up log file .  Once it's open, start a loop to listen
+// for log events and write them to file.
+OS.File.open(HISTORY_LOG_PATH, { write: true, append: true }).then(
+  function(file) {
+
+    // Save a handle to the file so we can close it later
+    historyLogFile = file;
+
+    // Loop to listen for log events
+    setTimeout(writeLogEventsToFile, MILLISECONDS_BETWEEN_WRITES, file);
+
+});
 
 
 // Retrieve the username and API key from memory, if there is one
@@ -76,14 +150,20 @@ function clearCredentials(callback) {
 }
 
 
-// Store the username and API key in the password memory
-// This clears out all existing usernames and API keys for this add-on.
+// Store the username in the password memory
+// This clears out all existing usernames for this add-on.
 function setCredential(credential, callback) {
   clearCredentials(function() {
     var storeOptions = {
       realm: credential.realm,
       username: credential.username,
-      password: credential.password,
+      // Currently, we only use a dummy password.
+      // Users of this system will not have access to each other's
+      // data.  We are using the `passwords` as a persistent memory
+      // of who has logged in most recently.  We use it instead of
+      // the `simple-storage` API because we may need to extend it
+      // to use passwords at some point in the future.
+      password: "dummy_password",
       onComplete: callback
     };
     passwords.store(storeOptions);
@@ -91,46 +171,52 @@ function setCredential(credential, callback) {
 }
 
 
-// Upload a navigation event to the web server
+// Add a log event to the queue so it can be written to file.
 function submitLogEvent(credential, tabData, eventMessage, callback, err) {
 
-  console.log("Logging event:", eventMessage, "-", tabData.tab_id, tabData.index, tabData.title, tabData.url);
+  console.log(
+    "Logging event: " + "[" + credential.username + "] " +
+    eventMessage + " - " +
+    [tabData.tab_id, tabData.index, tabData.title, tabData.url].join(', ')
+  );
 
-  var request = Request({
-    url: HOST + "/log/api/location_event/",
-    content: JSON.stringify({
-      visit_date: new Date().toISOString(),
-      tab_id: tabData.tab_id,
-      tab_index: tabData.index,
-      title: tabData.title,
-      url: tabData.url,
-      event_type: eventMessage
-    }),
-    contentType: 'application/json',
-    headers: {
-      Authorization: "ApiKey " + credential.username + ":" + credential.password
-    },
-    onComplete: function(response) {
-      if (response.status === 0) {
-        if (err !== undefined) {
-          err(response);
-        }
-      }
-      if (callback !== undefined) {
-        callback(response);
-      }
-    }
-  });
-  request.post();
+  // We perform this before doing File I/O to avoid reporting
+  // the time after potentially time-intensive file I/O.
+  var visitDate = new Date().toISOString();
+  var logData = {
+    user: credential.username,
+    timestamp: visitDate,
+    event_type: eventMessage,
+    tab_id: tabData.tab_id,
+    tab_index: tabData.index,
+    tab_title: tabData.title,
+    tab_url: tabData.url
+  };
+  logQueue.push(logData);
+
+  // Before, this callback was called by a more complex inner method
+  // Right now, we always assume that a logging eent succeeds.
+  if (callback !== undefined) {
+    callback();
+  }
 
 }
 
 
 function isCredentialValid(credential, callback) {
-  submitLogEvent(credential, windows.activeWindow.tabs.activeTab, "Testing API key", function(response) {
-    // HTTP response 201 is the response for a created resource
-    callback(response.status === 201);
+
+  // Save a record that there was a login attempt
+  submitLogEvent(credential, windows.activeWindow.tabs.activeTab,
+      "Testing API key", function() {
+  
+    // This function used to query a server to determine if
+    // a username and password were valid.  However, for the time
+    // being, it is now just a dummy function, where any
+    // credentials are considered to be valid.
+    callback(true);
+
   });
+
 }
 
 
@@ -146,63 +232,61 @@ function askForCredential(callback, skip, err) {
   // (true) or unintentionally (false) (e.g., by a change of focus).
   var panelDismissed;
 
-  var apiKeyEntry = Panel({
+  var usernameEntry = Panel({
     width: 250,
-    height: 180,
+    height: 130,
     contentURL: data.url("authentication.html"),
     contentScriptFile: data.url("authentication.js"),
   });
 
-  apiKeyEntry.on('show', function() {
+  usernameEntry.on('show', function() {
     panelDismissed = false;
-    apiKeyEntry.port.emit('show');
+    usernameEntry.port.emit('show');
   });
 
-  apiKeyEntry.port.on('submit', function(data) {
+  usernameEntry.port.on('submit', function(data) {
 
     panelDismissed = true;
     var username = data.username;
-    var apiKey = data.apiKey;
 
-    if (apiKey !== '' && apiKey !== null && username !== '' && username !== null) {
+    if (username !== '' && username !== null) {
       var credential = {
         realm: CREDENTIAL_REALM,
         username: username,
-        password: apiKey
       };
       isCredentialValid(credential, function(valid) {
         if (valid === true) {
           setCredential(credential, function() {
-            apiKeyEntry.hide();
+            usernameEntry.hide();
             if (callback !== undefined) {
               callback(credential);
             }
           });
         } else {
-          apiKeyEntry.port.emit('retry');
+          usernameEntry.port.emit('retry');
         }
       });
     } else {
-      apiKeyEntry.port.emit('retry');
+      usernameEntry.port.emit('retry');
     }
 
   });
 
-  apiKeyEntry.port.on('cancel', function() {
+  usernameEntry.port.on('cancel', function() {
     panelDismissed = true;
-    apiKeyEntry.hide();
+    usernameEntry.hide();
     if (err !== undefined) {
       err();
     }
   });
 
-  apiKeyEntry.on('hide', function() {
+  usernameEntry.on('hide', function() {
     if (panelDismissed === false && skip !== undefined) {
       skip();
     }
   });
 
-  apiKeyEntry.show();
+  usernameEntry.show();
 
 }
 
@@ -396,3 +480,9 @@ helpfulnessButton = ToggleButton({
     '64': './thumbsup-64.png',
   }
 });
+
+
+exports.onUnload = function() {
+  console.log("Unloading addon.  Now closing file.");
+  historyLogFile.close();
+};
